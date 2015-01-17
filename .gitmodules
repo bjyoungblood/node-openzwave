@@ -1,0 +1,3 @@
+[submodule "deps/openzwave"]
+	path = deps/openzwave
+	url = https://github.com/bjyoungblood/openzwave-mirror.git
