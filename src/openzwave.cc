@@ -47,6 +47,10 @@ struct OZW: ObjectWrap {
 	static Handle<Value> DisablePoll(const Arguments& args);
 	static Handle<Value> HardReset(const Arguments& args);
 	static Handle<Value> SoftReset(const Arguments& args);
+  static Handle<Value> AddAssociation(const Arguments& args);
+  static Handle<Value> RemoveAssociation(const Arguments& args);
+  static Handle<Value> GetNumGroups(const Arguments& args);
+  static Handle<Value> RemoveFailedNode(const Arguments& args);
 };
 
 Persistent<Object> context_obj;
@@ -109,6 +113,7 @@ NodeInfo *get_node_info(uint8_t nodeid)
  */
 void cb(OpenZWave::Notification const *cb, void *ctx)
 {
+  fprintf(stderr, "cb\n");
 	NotifInfo *notif = new NotifInfo();
 
 	notif->type = cb->GetType();
@@ -123,6 +128,7 @@ void cb(OpenZWave::Notification const *cb, void *ctx)
 	 */
 	switch (notif->type) {
 	case OpenZWave::Notification::Type_Group:
+    fprintf(stderr, "group notification");
 		notif->groupidx = cb->GetGroupIdx();
 		break;
 	case OpenZWave::Notification::Type_NodeEvent:
@@ -165,6 +171,14 @@ void async_cb_handler(uv_async_t *handle, int status)
 		notif = zqueue.front();
 
 		switch (notif->type) {
+    case OpenZWave::Notification::Type_NodeEvent:
+      homeid = notif->homeid;
+      args[0] = String::New("node event");
+      args[1] = Integer::New(notif->homeid);
+      args[2] = Integer::New(notif->nodeid);
+      MakeCallback(context_obj, "emit", 3, args);
+      break;
+
 		case OpenZWave::Notification::Type_DriverReady:
 			homeid = notif->homeid;
 			args[0] = String::New("driver ready");
@@ -201,7 +215,11 @@ void async_cb_handler(uv_async_t *handle, int status)
 		 * wait until the node is ready before retrieving information.
 		 */
 		case OpenZWave::Notification::Type_NodeProtocolInfo:
+      fprintf(stderr, "node protocol info");
+      break;
 		case OpenZWave::Notification::Type_NodeNaming:
+      fprintf(stderr, "node naming");
+      break;
 		// XXX: these should be supported correctly.
 		case OpenZWave::Notification::Type_PollingEnabled:
 		case OpenZWave::Notification::Type_PollingDisabled:
@@ -209,8 +227,10 @@ void async_cb_handler(uv_async_t *handle, int status)
 		/*
 		 * Node values.
 		 */
-		case OpenZWave::Notification::Type_ValueAdded:
-		case OpenZWave::Notification::Type_ValueChanged:
+    case OpenZWave::Notification::Type_ValueRefreshed:
+      fprintf(stderr, "Value refreshed");
+    case OpenZWave::Notification::Type_ValueAdded:
+    case OpenZWave::Notification::Type_ValueChanged:
 		{
 			OpenZWave::ValueID value = notif->values.front();
 			Local<Object> valobj = Object::New();
@@ -286,7 +306,10 @@ void async_cb_handler(uv_async_t *handle, int status)
 			}
 			case OpenZWave::ValueID::ValueType_List:
 			{
-				Local<Array> items;
+				std::string val;
+        OpenZWave::Manager::Get()->GetValueListSelection(value, &val);
+        valobj->Set(String::NewSymbol("value"), String::New(val.c_str()));
+        break;
 			}
 			case OpenZWave::ValueID::ValueType_Short:
 			{
@@ -307,6 +330,7 @@ void async_cb_handler(uv_async_t *handle, int status)
 			 */
 			case OpenZWave::ValueID::ValueType_Button:
 			{
+        fprintf(stderr, "button!\n");
 				break;
 			}
 			default:
@@ -327,8 +351,6 @@ void async_cb_handler(uv_async_t *handle, int status)
 		 * the value just being polled.  Ignore, as we handle actual
 		 * changes above.
 		 */
-		case OpenZWave::Notification::Type_ValueRefreshed:
-			break;
 		case OpenZWave::Notification::Type_ValueRemoved:
 		{
 			OpenZWave::ValueID value = notif->values.front();
@@ -348,12 +370,14 @@ void async_cb_handler(uv_async_t *handle, int status)
 			MakeCallback(context_obj, "emit", 4, args);
 			break;
 		}
+
 		/*
 		 * I believe this means that the node is now ready to accept
 		 * commands, however for now we will wait until all queries are
 		 * complete before notifying upstack, just in case.
 		 */
 		case OpenZWave::Notification::Type_EssentialNodeQueriesComplete:
+      fprintf(stderr, "essential queries complete\n");
 			break;
 		/*
 		 * The node is now fully ready for operation.
@@ -388,7 +412,10 @@ void async_cb_handler(uv_async_t *handle, int status)
 		 * care about dead nodes - is there anything we can do anyway?
 		 */
 		case OpenZWave::Notification::Type_AwakeNodesQueried:
+      fprintf(stderr, "awake nodes queried\n");
+      break;
 		case OpenZWave::Notification::Type_AllNodesQueried:
+      fprintf(stderr, "all nodes queried\n");
 		case OpenZWave::Notification::Type_AllNodesQueriedSomeDead:
 			args[0] = String::New("scan complete");
 			MakeCallback(context_obj, "emit", 1, args);
@@ -402,6 +429,13 @@ void async_cb_handler(uv_async_t *handle, int status)
 			args[2] = Integer::New(notif->notification);
 			MakeCallback(context_obj, "emit", 3, args);
 			break;
+
+    case OpenZWave::Notification::Type_Group:
+      args[0] = String::New("group change");
+      args[1] = Integer::New(notif->nodeid);
+      args[2] = Integer::New(notif->groupidx);
+      MakeCallback(context_obj, "emit", 3, args);
+      break;
 		/*
 		 * Send unhandled events to stderr so we can monitor them if
 		 * necessary.
@@ -427,7 +461,8 @@ Handle<Value> OZW::New(const Arguments& args)
 
 	Local<Object> opts = args[0]->ToObject();
 	std::string confpath = (*String::Utf8Value(opts->Get(String::New("modpath")->ToString())));
-	confpath += "/../deps/open-zwave/config";
+  std::string networkKey = (*String::Utf8Value(opts->Get(String::New("networkkey")->ToString())));
+	confpath += "/../deps/openzwave/config";
 
 	/*
 	 * Options are global for all drivers and can only be set once.
@@ -439,7 +474,10 @@ Handle<Value> OZW::New(const Arguments& args)
 	OpenZWave::Options::Get()->AddOptionInt("DriverMaxAttempts", opts->Get(String::New("driverattempts"))->IntegerValue());
 	OpenZWave::Options::Get()->AddOptionInt("PollInterval", opts->Get(String::New("pollinterval"))->IntegerValue());
 	OpenZWave::Options::Get()->AddOptionBool("IntervalBetweenPolls", true);
-	OpenZWave::Options::Get()->AddOptionBool("SuppressValueRefresh", opts->Get(String::New("suppressrefresh"))->BooleanValue());
+	OpenZWave::Options::Get()->AddOptionBool("SuppressValueRefresh", false);
+  OpenZWave::Options::Get()->AddOptionString("NetworkKey", networkKey, false);
+  OpenZWave::Options::Get()->AddOptionBool("Associate", true);
+  OpenZWave::Options::Get()->AddOptionBool("NotifyTransactions", true);
 	OpenZWave::Options::Get()->Lock();
 
 	return scope.Close(args.This());
@@ -477,6 +515,43 @@ Handle<Value> OZW::Disconnect(const Arguments& args)
 	OpenZWave::Options::Destroy();
 
 	return scope.Close(Undefined());
+}
+
+Handle<Value> OZW::GetNumGroups(const Arguments& args)
+{
+  HandleScope scope;
+
+  uint8_t node_id = args[0]->ToNumber()->Value();
+
+  uint8_t result = OpenZWave::Manager::Get()->GetNumGroups(homeid, node_id);
+
+  return scope.Close(Integer::New(result));
+}
+
+Handle<Value> OZW::AddAssociation(const Arguments& args)
+{
+  HandleScope scope;
+
+  uint8_t node_id = args[0]->ToNumber()->Value();
+  uint8_t group_idx = args[1]->ToNumber()->Value();
+  uint8_t target_node_id = args[2]->ToNumber()->Value();
+
+  OpenZWave::Manager::Get()->AddAssociation(homeid, node_id, group_idx, target_node_id);
+
+  return scope.Close(Undefined());
+}
+
+Handle<Value> OZW::RemoveAssociation(const Arguments& args)
+{
+  HandleScope scope;
+
+  uint8_t node_id = args[0]->ToNumber()->Value();
+  uint8_t group_idx = args[1]->ToNumber()->Value();
+  uint8_t target_node_id = args[2]->ToNumber()->Value();
+
+  OpenZWave::Manager::Get()->RemoveAssociation(homeid, node_id, group_idx, target_node_id);
+
+  return scope.Close(Undefined());
 }
 
 /*
@@ -678,6 +753,26 @@ Handle<Value> OZW::DisablePoll(const Arguments& args)
 	return scope.Close(Undefined());
 }
 
+Handle<Value> OZW::RemoveFailedNode(const Arguments& args)
+{
+  HandleScope scope;
+
+  uint8_t nodeid = args[0]->ToNumber()->Value();
+
+  if (OpenZWave::Manager::Get()->IsNodeFailed(homeid, nodeid)) {
+    OpenZWave::Manager::Get()->BeginControllerCommand(
+      homeid,
+      OpenZWave::Driver::ControllerCommand_RemoveFailedNode,
+      NULL,
+      NULL,
+      FALSE,
+      nodeid
+    );
+  }
+
+  return scope.Close(Undefined());
+}
+
 /*
  * Reset the ZWave controller chip.  A hard reset is destructive and wipes
  * out all known configuration, a soft reset just restarts the chip.
@@ -719,6 +814,10 @@ extern "C" void init(Handle<Object> target)
 	NODE_SET_PROTOTYPE_METHOD(t, "disablePoll", OZW::EnablePoll);
 	NODE_SET_PROTOTYPE_METHOD(t, "hardReset", OZW::HardReset);
 	NODE_SET_PROTOTYPE_METHOD(t, "softReset", OZW::SoftReset);
+  NODE_SET_PROTOTYPE_METHOD(t, "addAssociation", OZW::AddAssociation);
+  NODE_SET_PROTOTYPE_METHOD(t, "removeAssociation", OZW::RemoveAssociation);
+  NODE_SET_PROTOTYPE_METHOD(t, "getNumGroups", OZW::GetNumGroups);
+  NODE_SET_PROTOTYPE_METHOD(t, "removeFailedNode", OZW::RemoveFailedNode);
 
 	target->Set(String::NewSymbol("Emitter"), t->GetFunction());
 }
