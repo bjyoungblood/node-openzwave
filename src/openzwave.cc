@@ -28,6 +28,8 @@
 #include "Options.h"
 #include "Value.h"
 
+#include "openzwave.h"
+
 using namespace v8;
 using namespace node;
 
