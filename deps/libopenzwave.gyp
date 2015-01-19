@@ -103,8 +103,7 @@
         'openzwave/cpp/src/Node.cpp',
         'openzwave/cpp/src/Options.cpp',
         'openzwave/cpp/src/Scene.cpp',
-        'openzwave/cpp/src/Utils.cpp',
-        'openzwave/cpp/src/vers.cpp'
+        'openzwave/cpp/src/Utils.cpp'
       ],
       'include_dirs': [
         'openzwave/cpp/hidapi/hidapi',
