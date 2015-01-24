@@ -53,9 +53,6 @@ struct OZW: ObjectWrap {
 	static Handle<Value> DisablePoll(const Arguments& args);
 	static Handle<Value> HardReset(const Arguments& args);
 	static Handle<Value> SoftReset(const Arguments& args);
-  static Handle<Value> AddAssociation(const Arguments& args);
-  static Handle<Value> RemoveAssociation(const Arguments& args);
-  static Handle<Value> GetNumGroups(const Arguments& args);
   static Handle<Value> RemoveFailedNode(const Arguments& args);
 };
 
@@ -523,43 +520,6 @@ Handle<Value> OZW::Disconnect(const Arguments& args)
 	return scope.Close(Undefined());
 }
 
-Handle<Value> OZW::GetNumGroups(const Arguments& args)
-{
-  HandleScope scope;
-
-  uint8_t node_id = args[0]->ToNumber()->Value();
-
-  uint8_t result = OpenZWave::Manager::Get()->GetNumGroups(homeid, node_id);
-
-  return scope.Close(Integer::New(result));
-}
-
-Handle<Value> OZW::AddAssociation(const Arguments& args)
-{
-  HandleScope scope;
-
-  uint8_t node_id = args[0]->ToNumber()->Value();
-  uint8_t group_idx = args[1]->ToNumber()->Value();
-  uint8_t target_node_id = args[2]->ToNumber()->Value();
-
-  OpenZWave::Manager::Get()->AddAssociation(homeid, node_id, group_idx, target_node_id);
-
-  return scope.Close(Undefined());
-}
-
-Handle<Value> OZW::RemoveAssociation(const Arguments& args)
-{
-  HandleScope scope;
-
-  uint8_t node_id = args[0]->ToNumber()->Value();
-  uint8_t group_idx = args[1]->ToNumber()->Value();
-  uint8_t target_node_id = args[2]->ToNumber()->Value();
-
-  OpenZWave::Manager::Get()->RemoveAssociation(homeid, node_id, group_idx, target_node_id);
-
-  return scope.Close(Undefined());
-}
-
 /*
  * Generic value set.
  */
@@ -820,9 +780,6 @@ extern "C" void init(Handle<Object> target)
 	NODE_SET_PROTOTYPE_METHOD(t, "disablePoll", OZW::EnablePoll);
 	NODE_SET_PROTOTYPE_METHOD(t, "hardReset", OZW::HardReset);
 	NODE_SET_PROTOTYPE_METHOD(t, "softReset", OZW::SoftReset);
-  NODE_SET_PROTOTYPE_METHOD(t, "addAssociation", OZW::AddAssociation);
-  NODE_SET_PROTOTYPE_METHOD(t, "removeAssociation", OZW::RemoveAssociation);
-  NODE_SET_PROTOTYPE_METHOD(t, "getNumGroups", OZW::GetNumGroups);
   NODE_SET_PROTOTYPE_METHOD(t, "removeFailedNode", OZW::RemoveFailedNode);
 
 	target->Set(String::NewSymbol("Emitter"), t->GetFunction());
